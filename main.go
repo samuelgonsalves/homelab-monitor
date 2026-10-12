@@ -6,8 +6,9 @@ import (
 	"encoding/json"
 	"time"
 	bolt "go.etcd.io/bbolt"
-	"strconv"
 )
+
+const BUCKET_NAME = "StatusBucket"
 
 var db *bolt.DB
 
@@ -22,16 +23,7 @@ func status(w http.ResponseWriter, r *http.Request) {
 
 	t := time.Now().Format("2006-01-02")
 
-	var v []byte
-	db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte("StatusBucket"))
-		v = b.Get([]byte(t))
-		return nil
-	})
-
-	if v != nil {
-		fmt.Printf("Found key value for today: %s\n", v)
-	}
+	StatusDbRecord(t)
 }
 
 func statusUpdate(w http.ResponseWriter, r *http.Request) {
@@ -42,8 +34,18 @@ func statusUpdate(w http.ResponseWriter, r *http.Request) {
 	t := time.Now().Format("2006-01-02")
 
 	db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte("StatusBucket"))
-		err := b.Put([]byte(t), []byte(strconv.FormatBool(reqData.Status)))
+		v := StatusDbRecord(t)
+
+		v.Status = reqData.Status
+
+		b := tx.Bucket([]byte(BUCKET_NAME))
+
+		bytes, err := json.Marshal(v)
+		if err != nil {
+			fmt.Printf("Failed to marshal status request: %v\n", err)
+			return err
+		}
+		err = b.Put([]byte(t), bytes)
 		return err
 	})
 
@@ -58,7 +60,7 @@ func main() {
 	}
 
 	err = db.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucketIfNotExists([]byte("StatusBucket"))
+		_, err := tx.CreateBucketIfNotExists([]byte(BUCKET_NAME))
 		if (err != nil) {
 			return err
 		}
@@ -70,6 +72,7 @@ func main() {
 
 	fmt.Println("DB and bucket finished setup")
 	defer db.Close()
+
 	http.HandleFunc("/backup-status-update", statusUpdate)
 	http.HandleFunc("/backup-status", status)
 
